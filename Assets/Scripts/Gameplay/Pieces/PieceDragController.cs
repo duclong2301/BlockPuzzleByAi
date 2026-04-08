@@ -44,9 +44,12 @@ public class PieceDragController : MonoBehaviour
         bool valid = _boardController.CanPlace(_draggedPiece.Data, origin);
         _boardController.ShowPreview(_draggedPiece.Data, origin, valid);
 
-        if (Mouse.current != null && Mouse.current.leftButton.wasReleasedThisFrame)
-            EndDrag(cursorGrid);
-        else if (Touchscreen.current != null && Touchscreen.current.primaryTouch.phase.ReadValue() == UnityEngine.InputSystem.TouchPhase.Ended)
+        // Check release — prioritise Touchscreen first; Mouse.current can be a
+        // virtual mouse on mobile and its button-released event is unreliable.
+        bool released = (Touchscreen.current != null &&
+                         Touchscreen.current.primaryTouch.phase.ReadValue() == UnityEngine.InputSystem.TouchPhase.Ended)
+                     || (Mouse.current != null && Mouse.current.leftButton.wasReleasedThisFrame);
+        if (released)
             EndDrag(cursorGrid);
     }
 
@@ -73,18 +76,34 @@ public class PieceDragController : MonoBehaviour
     }
 
     /// <summary>
-    /// Converts screen mouse position to world position for an orthographic camera.
+    /// Converts screen input position to world position for an orthographic camera.
+    /// Touchscreen is checked first and remains active during TouchPhase.Ended so
+    /// that EndDrag still receives the correct final finger position on release.
+    /// Falling back to Mouse.current on mobile would read the virtual mouse which
+    /// has a stale or zero position the moment the finger lifts.
     /// </summary>
     private static Vector3 GetMouseWorldPos()
     {
         Vector2 screenPos;
+        if (Touchscreen.current != null)
+        {
+            var phase = Touchscreen.current.primaryTouch.phase.ReadValue();
+            // Read touch pos for any meaningful phase — including Ended — so the
+            // last finger position is used when the drag is committed.
+            if (phase != UnityEngine.InputSystem.TouchPhase.None &&
+                phase != UnityEngine.InputSystem.TouchPhase.Canceled)
+            {
+                screenPos = Touchscreen.current.primaryTouch.position.ReadValue();
+                Vector3 tp = new Vector3(screenPos.x, screenPos.y, -Camera.main.transform.position.z);
+                return Camera.main.ScreenToWorldPoint(tp);
+            }
+        }
         if (Mouse.current != null)
+        {
             screenPos = Mouse.current.position.ReadValue();
-        else if (Touchscreen.current != null)
-            screenPos = Touchscreen.current.primaryTouch.position.ReadValue();
-        else
-            return Vector3.zero;
-        Vector3 pos = new Vector3(screenPos.x, screenPos.y, -Camera.main.transform.position.z);
-        return Camera.main.ScreenToWorldPoint(pos);
+            Vector3 mp = new Vector3(screenPos.x, screenPos.y, -Camera.main.transform.position.z);
+            return Camera.main.ScreenToWorldPoint(mp);
+        }
+        return Vector3.zero;
     }
 }
